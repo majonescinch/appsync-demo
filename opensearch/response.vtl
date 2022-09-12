@@ -8,12 +8,12 @@
 ## build facets
 #set ($facets = {})
 
-#foreach($key in $context.result.aggregations.get("all_vehicles").keySet())
-	#if($key.startsWith("all_"))
-    	#set($name = $key.substring(4))
+#foreach($aggregate in $context.result.aggregations.get("all_vehicles").entrySet())
+	#if($aggregate.key.startsWith("all_"))
+      #set($name = $aggregate.key.substring(4))
         #set($buckets = [])
         
-        #foreach($bucket in $context.result.aggregations.all_vehicles.get($key).buckets)
+        #foreach($bucket in $aggregate.value.get("buckets"))
         	#set($count = $bucket.get("doc_count"))
         	
             #if ($bucket.get("filtered"))

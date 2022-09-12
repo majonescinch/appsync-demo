@@ -9,21 +9,21 @@
   ## map packs
   #set ($packs = {})
 
-  #foreach ($key in $body.get("packs").keySet())
+  #foreach ($item in $body.get("packs").entrySet())
     ## GraphQL doesn't support hyphens in names
-    #set ($name = $key.replace("-", "_"))
+    #set ($name = $item.key.replace("-", "_"))
     #set ($pack = [])
       
-    #foreach ($version in $body.get("packs").get($key).keySet())
+    #foreach ($version in $item.value.entrySet())
       #set ($packVersion = {
-          "version": $version
-        })
-        
-        #foreach ($property in $body.get("packs").get($key).get($version).keySet())
-          $util.qr($packVersion.put("${property}", $body.get("packs").get($key).get($version).get($property)))
-        #end
-        
-        $util.qr($pack.add($packVersion))
+        "version": $version.key
+      })
+
+      #foreach ($property in $version.value.entrySet())
+        $util.qr($packVersion.put("${property.key}", $property.value))
+      #end
+
+      $util.qr($pack.add($packVersion))
     #end
 
     $util.qr($packs.put("${name}", $pack))

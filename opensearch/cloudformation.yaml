@@ -161,11 +161,11 @@ Resources:
         #set($filterQuery = [])
 
         #if ($filter)
-          #foreach($key in $filter.keySet())
-            #if ($key)
+          #foreach($item in $filter.entrySet())
+            #if ($item)
               ## TODO: add support for non term queries
               #set($query = {
-                  "term":{ "${key}": $filter.get($key) }
+                  "term":{ "${item.key}": $item.value }
               })
 
               $util.qr($filterQuery.add($query))
@@ -249,12 +249,12 @@ Resources:
         ## build facets
         #set ($facets = {})
 
-        #foreach($key in $context.result.aggregations.get("all_vehicles").keySet())
-          #if($key.startsWith("all_"))
-              #set($name = $key.substring(4))
+        #foreach($aggregate in $context.result.aggregations.get("all_vehicles").entrySet())
+          #if($aggregate.key.startsWith("all_"))
+              #set($name = $aggregate.key.substring(4))
                 #set($buckets = [])
                 
-                #foreach($bucket in $context.result.aggregations.all_vehicles.get($key).buckets)
+                #foreach($bucket in $aggregate.value.get("buckets"))
                   #set($count = $bucket.get("doc_count"))
                   
                     #if ($bucket.get("filtered"))
@@ -287,7 +287,6 @@ Resources:
         })
 
         $utils.toJson($resultMap)
-
 
 Outputs:
   GraphQLApiEndpoint:

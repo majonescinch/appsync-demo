@@ -18,11 +18,11 @@
 #set($filterQuery = [])
 
 #if ($filter)
-  #foreach($key in $filter.keySet())
-    #if ($key)
+  #foreach($item in $filter.entrySet())
+    #if ($item)
       ## TODO: add support for non term queries
       #set($query = {
-          "term":{ "${key}": $filter.get($key) }
+          "term":{ "${item.key}": $item.value }
       })
 
       $util.qr($filterQuery.add($query))
