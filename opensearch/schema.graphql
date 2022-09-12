@@ -1,0 +1,82 @@
+schema {
+   query: Query
+ }
+
+interface Facet {
+	name: String
+	count: Int
+}
+
+type Facets {
+	bodyType: [ValueFacet]
+	colour: [ValueFacet]
+	doors: [ValueFacet]
+	driveType: [ValueFacet]
+	fuelType: [ValueFacet]
+	make: [Make]
+	mileage: [ValueFacet]
+	priceBucket: [ValueFacet]
+	transmissionType: [ValueFacet]
+	seats: [ValueFacet]
+	vehicleYear: [ValueFacet]
+}
+
+type Make implements Facet {
+	name: String
+	count: Int
+	models: [Model]
+}
+
+type Model implements Facet {
+	name: String
+	count: Int
+	variants: [ValueFacet]
+}
+
+type Query {
+	vehicles(filter: VehicleListingInput, pageNumber: Int!, pageSize: Int!): SearchResult
+}
+
+type SearchResult {
+	pageNumber: Int
+	pageSize: Int
+	searchResultsCount: Int
+	vehicleListings: [VehicleListing]
+	facets: Facets
+}
+
+type ValueFacet implements Facet {
+	name: String
+	count: Int
+}
+
+type VehicleListing {
+	bodyType: String
+	colour: String
+	doors: Int
+	engineSize: Int
+	vrm: String
+	make: String
+	model: String
+	modelYear: Int
+	seats: Int
+	transmissionType: String
+	trim: String
+	variant: String
+	vehicleYear: Int
+}
+
+input VehicleListingInput {
+	bodyType: String
+	colour: String
+	doors: Int
+	engineSize: Int
+	make: String
+	model: String
+	modelYear: Int
+	seats: Int
+	transmissionType: String
+	trim: String
+	variant: String
+	vehicleYear: Int
+}

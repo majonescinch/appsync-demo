@@ -1,0 +1,96 @@
+## Note: not sure we need to do this as GraphQL gives us this functionality
+#set($selectedFields = $context.info.selectionSetList)
+#set ($sourceFields = [])
+
+#foreach($field in $selectedFields)
+#if ($field.startsWith("vehicleListings"))
+    #set ($index = $field.indexOf('/'))
+    #if ($index >= 0)
+      #set ($index = $index + 1)
+        #set ($fieldName = $field.substring($index))
+        $util.qr($sourceFields.add("${fieldName}"))
+    #end
+#end
+#end
+
+## build filter query
+#set($filter = $context.arguments.filter)
+#set($filterQuery = [])
+
+#if ($filter)
+  #foreach($key in $filter.keySet())
+    #if ($key)
+      ## TODO: add support for non term queries
+      #set($query = {
+          "term":{ "${key}": $filter.get($key) }
+      })
+
+      $util.qr($filterQuery.add($query))
+    #end
+  #end
+#end
+
+## build aggregates query
+#set($aggregateTerms = [ "bodyType","colour","doors","driveType","fuelType","make","mileage","priceBucket","transmissionType","seats","vehicleYear" ])
+
+#set($aggregateFilterQuery = {
+  "filtered": {
+  	"filter": {
+      "bool": {
+        "filter": $filterQuery
+      }
+    }
+  }
+})
+
+#set($aggregatesQuery = {})
+
+#foreach($term in $aggregateTerms)
+	#set($termQuery = {
+        "terms": {
+            "field": "${term}",
+            "size": 100
+        }
+    })
+    
+    #if ($filter)
+    	$util.qr($termQuery.put("aggs", $aggregateFilterQuery))
+    #end
+    
+	$util.qr($aggregatesQuery.put("all_${term}", $termQuery))
+#end
+
+#set($aggs = {
+	"all_vehicles": {
+    	"global": {},
+        "aggs": $aggregatesQuery
+    }
+})
+
+#set($pageNumber = $context.arguments.pageSize * ($context.arguments.pageNumber))
+
+##TODO: move body incase there are no filters i.e. search ALL or get facets
+
+{
+  "version":"2017-02-28",
+  "operation":"GET",
+  "path":"/vehicles/_search",
+  "params":{
+      "headers":{},
+      "queryString":{},
+      "body":{
+          "_source": $util.toJson($sourceFields),
+          "from": $util.toJson($pageNumber),
+          "size": $util.toJson($context.arguments.pageSize),
+          "query":{
+              "bool": {
+                  "must": {
+                    "match_all": {}
+                  },
+                  "filter": $util.toJson($filterQuery)
+              }
+          },
+          "aggs": $util.toJson($aggs)
+      }
+  }
+}

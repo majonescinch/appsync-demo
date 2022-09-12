@@ -1,0 +1,299 @@
+---
+Description: AWS AppSync Vehicle Search API
+
+Parameters:
+  APIName:
+    Type: String
+    Description: "Name of the API, for generate names for resources"
+    MinLength: 3
+    MaxLength: 20
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_\\-]*$"
+  OpenSearchClusterArn:
+    Type: String
+    Description: "OpenSearch cluster ARN"
+  OpenSearchClusterEndpoint:
+    Type: String
+    Description: "OpenSearch cluster endpoint"
+
+Resources:
+  OpenSearchRole:
+    Type: AWS::IAM::Role
+    DependsOn: AppSyncOpenSearchPolicy
+    Properties:
+      RoleName: !Sub ${APIName}-appsync-oss-role
+      PermissionsBoundary:
+        !Join [
+          "",
+          [
+            "arn:aws:iam::",
+            !Ref AWS::AccountId,
+            ":policy/infrastructure/CinchRoleBoundary",
+          ],
+        ]
+      ManagedPolicyArns:
+        - Ref: AppSyncOpenSearchPolicy
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com  
+
+  AppSyncOpenSearchPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Managed policy to allow AWS AppSync to access the OpenSearch cluster.
+      Path: "/appsync/elasticsearch/"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - es:ESHttpDelete
+              - es:ESHttpHead
+              - es:ESHttpGet
+              - es:ESHttpPost
+              - es:ESHttpPut
+            Resource: !Join ["/", [!Ref OpenSearchClusterArn, "*"]]
+
+  AppSyncApi:
+    Type: "AWS::AppSync::GraphQLApi"
+    Description: "The GraphQL API for the Vehicle App"
+    Properties:
+      AuthenticationType: "API_KEY"
+      Name: !Sub ${APIName}
+
+  AppSyncKey:
+    Type: AWS::AppSync::ApiKey
+    Properties: 
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Description: "The GraphQL API Key"
+
+  AppSyncSchema:
+    Type: "AWS::AppSync::GraphQLSchema"
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Definition: |
+        type Query {
+          vehicles(filter: VehicleListingInput, pageNumber: Int!, pageSize: Int!): SearchResult
+        }
+
+        type SearchResult {
+          pageNumber: Int
+          pageSize: Int
+          searchResultsCount: Int
+          vehicleListings: [VehicleListing]
+        }
+
+        type VehicleListing {
+          bodyType: String
+          colour: String
+          doors: Int
+          engineSize: Int
+          fullRegistration: String
+          make: String
+          model: String
+          modelYear: Int
+          seats: Int
+          transmissionType: String
+          trim: String
+          variant: String
+          vehicleYear: Int
+        }
+
+        input VehicleListingInput {
+          bodyType: String
+          colour: String
+          doors: Int
+          engineSize: Int
+          fullRegistration: String
+          make: String
+          model: String
+          modelYear: Int
+          seats: Int
+          transmissionType: String
+          trim: String
+          variant: String
+          vehicleYear: Int
+        }
+
+  AppSyncVehicleDataIndexDataSource:
+    Type: "AWS::AppSync::DataSource"
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: "vehicle_oss"
+      Description: "The Vehicle Data Index Data Source"
+      Type: AMAZON_OPENSEARCH_SERVICE
+      ServiceRoleArn: !GetAtt OpenSearchRole.Arn
+      OpenSearchServiceConfig:
+        AwsRegion: !Sub ${AWS::Region}
+        Endpoint: !Sub ${OpenSearchClusterEndpoint}
+
+  AppSyncGetVehicleDataQueryResolver:
+    Type: "AWS::AppSync::Resolver"
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: vehicles
+      DataSourceName: !GetAtt AppSyncVehicleDataIndexDataSource.Name
+      RequestMappingTemplate: |
+        ## Note: not sure we need to do this as GraphQL gives us this functionality
+        #set($selectedFields = $context.info.selectionSetList)
+        #set ($sourceFields = [])
+
+        #foreach($field in $selectedFields)
+        #if ($field.startsWith("vehicleListings"))
+            #set ($index = $field.indexOf('/'))
+            #if ($index >= 0)
+              #set ($index = $index + 1)
+                #set ($fieldName = $field.substring($index))
+                $util.qr($sourceFields.add("${fieldName}"))
+            #end
+        #end
+        #end
+
+        ## build filter query
+        #set($filter = $context.arguments.filter)
+        #set($filterQuery = [])
+
+        #if ($filter)
+          #foreach($key in $filter.keySet())
+            #if ($key)
+              ## TODO: add support for non term queries
+              #set($query = {
+                  "term":{ "${key}": $filter.get($key) }
+              })
+
+              $util.qr($filterQuery.add($query))
+            #end
+          #end
+        #end
+
+        ## build aggregates query
+        #set($aggregateTerms = [ "bodyType","colour","doors","driveType","fuelType","make","mileage","priceBucket","transmissionType","seats","vehicleYear" ])
+
+        #set($aggregateFilterQuery = {
+          "filtered": {
+            "filter": {
+              "bool": {
+                "filter": $filterQuery
+              }
+            }
+          }
+        })
+
+        #set($aggregatesQuery = {})
+
+        #foreach($term in $aggregateTerms)
+          #set($termQuery = {
+                "terms": {
+                    "field": "${term}",
+                    "size": 100
+                }
+            })
+            
+            #if ($filter)
+              $util.qr($termQuery.put("aggs", $aggregateFilterQuery))
+            #end
+            
+          $util.qr($aggregatesQuery.put("all_${term}", $termQuery))
+        #end
+
+        #set($aggs = {
+          "all_vehicles": {
+              "global": {},
+                "aggs": $aggregatesQuery
+            }
+        })
+
+        #set($pageNumber = $context.arguments.pageSize * ($context.arguments.pageNumber))
+
+        ##TODO: move body incase there are no filters i.e. search ALL or get facets
+
+        {
+          "version":"2017-02-28",
+          "operation":"GET",
+          "path":"/vehicles/_search",
+          "params":{
+              "headers":{},
+              "queryString":{},
+              "body":{
+                  "_source": $util.toJson($sourceFields),
+                  "from": $util.toJson($pageNumber),
+                  "size": $util.toJson($context.arguments.pageSize),
+                  "query":{
+                      "bool": {
+                          "must": {
+                            "match_all": {}
+                          },
+                          "filter": $util.toJson($filterQuery)
+                      }
+                  },
+                  "aggs": $util.toJson($aggs)
+              }
+          }
+        }
+
+      ResponseMappingTemplate: |
+        ## build vehicle listings
+        #set ($vehicleListings = [])
+
+        #foreach($entry in $context.result.hits.hits)
+          $util.qr($vehicleListings.add($entry.get("_source")))
+        #end
+
+        ## build facets
+        #set ($facets = {})
+
+        #foreach($key in $context.result.aggregations.get("all_vehicles").keySet())
+          #if($key.startsWith("all_"))
+              #set($name = $key.substring(4))
+                #set($buckets = [])
+                
+                #foreach($bucket in $context.result.aggregations.all_vehicles.get($key).buckets)
+                  #set($count = $bucket.get("doc_count"))
+                  
+                    #if ($bucket.get("filtered"))
+                      #set($filteredCount = $bucket.get("filtered").get("doc_count"))
+
+                      #if ($filteredCount)
+                          #set($count = $filteredCount)
+                      #end
+                    #end
+                
+                  #set($value = {
+                      "name": $bucket.get("key"),
+                        "count": $count
+                    })
+                    
+                    $util.qr($buckets.add($value))
+                #end
+                
+                $util.qr($facets.put("${name}", $buckets))       
+            #end    
+        #end
+
+        ## build result
+        #set ($resultMap = {
+          "pageNumber": $context.arguments.pageNumber,
+          "pageSize": $context.arguments.pageSize,
+          "searchResultsCount": $utils.toJson($context.result.hits.total.value),
+          "vehicleListings": $vehicleListings,
+          "facets": $facets
+        })
+
+        $utils.toJson($resultMap)
+
+
+Outputs:
+  GraphQLApiEndpoint:
+    Description: The URL to the GraphQL Endpoint
+    Value: !GetAtt AppSyncApi.GraphQLUrl
+
+  GraphQLApiId:
+    Description: The API ID of the GraphQL API
+    Value: !GetAtt AppSyncApi.ApiId

@@ -1,0 +1,29 @@
+schema {
+  query: Query
+}
+
+type Query {
+	vehicleData(filter: VehicleDataInput): VehicleData
+}
+
+type VehicleData {
+	profileId: String
+	header: VehicleHeader
+	snapshotVersion: Int
+}
+
+input VehicleDataInput {
+	vin: String!
+	snapshotVersion: String = "$LATEST"
+	type: String = "METAL"
+}
+
+type VehicleHeader {
+	vin: String
+	type: String
+}
+
+type VehicleListing {
+	bodyType: String
+	colour: String
+}

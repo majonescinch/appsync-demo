@@ -1,0 +1,48 @@
+## build vehicle listings
+#set ($vehicleListings = [])
+
+#foreach($entry in $context.result.hits.hits)
+  $util.qr($vehicleListings.add($entry.get("_source")))
+#end
+
+## build facets
+#set ($facets = {})
+
+#foreach($key in $context.result.aggregations.get("all_vehicles").keySet())
+	#if($key.startsWith("all_"))
+    	#set($name = $key.substring(4))
+        #set($buckets = [])
+        
+        #foreach($bucket in $context.result.aggregations.all_vehicles.get($key).buckets)
+        	#set($count = $bucket.get("doc_count"))
+        	
+            #if ($bucket.get("filtered"))
+              #set($filteredCount = $bucket.get("filtered").get("doc_count"))
+
+              #if ($filteredCount)
+                  #set($count = $filteredCount)
+              #end
+            #end
+        
+        	#set($value = {
+            	"name": $bucket.get("key"),
+                "count": $count
+            })
+            
+            $util.qr($buckets.add($value))
+        #end
+        
+        $util.qr($facets.put("${name}", $buckets))       
+    #end    
+#end
+
+## build result
+#set ($resultMap = {
+  "pageNumber": $context.arguments.pageNumber,
+  "pageSize": $context.arguments.pageSize,
+  "searchResultsCount": $utils.toJson($context.result.hits.total.value),
+  "vehicleListings": $vehicleListings,
+  "facets": $facets
+})
+
+$utils.toJson($resultMap)

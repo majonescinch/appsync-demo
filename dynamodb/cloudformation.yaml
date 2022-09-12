@@ -1,0 +1,204 @@
+---
+Description: AWS AppSync Vehicle API
+
+Parameters:
+  APIName:
+    Type: String
+    Description: "Name of the API, for generate names for resources"
+    MinLength: 3
+    MaxLength: 20
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+
+Resources:
+  DynamoDBVehicleDataTable:
+    Type: "AWS::DynamoDB::Table"
+    Description: "Data store for AWS AppSync Vehicle Data"
+    Properties:
+      TableName: !Sub ${APIName}-vehicle-data
+      AttributeDefinitions:
+        - AttributeName: "vin"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "vin"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  DynamoDBRole:
+    Type: AWS::IAM::Role
+    DependsOn: AppSyncDynamoDBPolicy
+    Properties:
+      RoleName: !Sub ${APIName}-appsync-dynamodb-role
+      PermissionsBoundary:
+        !Join [
+          "",
+          [
+            "arn:aws:iam::",
+            !Ref AWS::AccountId,
+            ":policy/infrastructure/CinchRoleBoundary",
+          ],
+        ]
+      ManagedPolicyArns:
+        - Ref: AppSyncDynamoDBPolicy
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com  
+
+  AppSyncDynamoDBPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Managed policy to allow AWS AppSync to access the tables created by this template.
+      Path: /appsync/
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:DeleteItem
+              - dynamodb:UpdateItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:BatchGetItem
+              - dynamodb:BatchWriteItem
+            Resource: !Join ["", [!GetAtt DynamoDBVehicleDataTable.Arn, "*"]]
+
+  AppSyncApi:
+    Type: "AWS::AppSync::GraphQLApi"
+    Description: "The GraphQL API for the Vehicle App"
+    Properties:
+      AuthenticationType: "API_KEY"
+      Name: !Sub ${APIName}
+
+  AppSyncKey:
+    Type: AWS::AppSync::ApiKey
+    Properties: 
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Description: "The GraphQL API Key"
+
+  AppSyncSchema:
+    Type: "AWS::AppSync::GraphQLSchema"
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Definition: |
+        type VehicleData {
+          vin: String!
+          make: String
+          model: String
+        }
+
+        type Query {
+          vehicleData(vin: String!): VehicleData
+        }
+
+        input TableBooleanFilterInput {
+          ne: Boolean
+          eq: Boolean
+        }
+
+        input TableFloatFilterInput {
+          ne: Float
+          eq: Float
+          le: Float
+          lt: Float
+          ge: Float
+          gt: Float
+          contains: Float
+          notContains: Float
+          between: [Float]
+        }
+
+        input TableIDFilterInput {
+          ne: ID
+          eq: ID
+          le: ID
+          lt: ID
+          ge: ID
+          gt: ID
+          contains: ID
+          notContains: ID
+          between: [ID]
+          beginsWith: ID
+        }
+
+        input TableIntFilterInput {
+          ne: Int
+          eq: Int
+          le: Int
+          lt: Int
+          ge: Int
+          gt: Int
+          contains: Int
+          notContains: Int
+          between: [Int]
+        }
+
+        input TableMattsTestVehicleDataFilterInput {
+          vin: TableStringFilterInput
+          make: TableStringFilterInput
+          model: TableStringFilterInput
+        }
+
+        input TableStringFilterInput {
+          ne: String
+          eq: String
+          le: String
+          lt: String
+          ge: String
+          gt: String
+          contains: String
+          notContains: String
+          between: [String]
+          beginsWith: String
+        }
+
+  AppSyncVehicleDataTableDataSource:
+    Type: "AWS::AppSync::DataSource"
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: !Sub ${APIName}_vehicle_data_table
+      Description: "The Vehicle Data Table AppSync Data Source"
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt DynamoDBRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref DynamoDBVehicleDataTable
+        AwsRegion: !Sub ${AWS::Region}
+
+  AppSyncGetVehicleDataQueryResolver:
+    Type: "AWS::AppSync::Resolver"
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: vehicleData
+      DataSourceName: !GetAtt AppSyncVehicleDataTableDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "GetItem",
+          "key": {
+            "vin": $util.dynamodb.toDynamoDBJson($ctx.args.vin)
+          }
+        }
+      ResponseMappingTemplate: "$util.toJson($ctx.result)"
+
+Outputs:
+  DynamoDBNotesTableName:
+    Description: The name of the DynamoDB Table
+    Value: !Ref DynamoDBVehicleDataTable
+
+  GraphQLApiEndpoint:
+    Description: The URL to the GraphQL Endpoint
+    Value: !GetAtt AppSyncApi.GraphQLUrl
+
+  GraphQLApiId:
+    Description: The API ID of the GraphQL API
+    Value: !GetAtt AppSyncApi.ApiId
