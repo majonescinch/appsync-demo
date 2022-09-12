@@ -2,6 +2,19 @@ schema {
   query: Query
 }
 
+type CatalogueBasic implements Pack {
+	version: String
+	fuelType: String
+}
+
+interface Pack {
+	version: String
+}
+
+type Packs {
+	catalogue_basic: [CatalogueBasic]
+}
+
 type Query {
 	vehicleData(filter: VehicleDataInput): VehicleData
 }
@@ -10,12 +23,13 @@ type VehicleData {
 	profileId: String
 	header: VehicleHeader
 	snapshotVersion: Int
+	packs: Packs
 }
 
 input VehicleDataInput {
 	vin: String!
-	snapshotVersion: String = "$LATEST"
-	type: String = "METAL"
+	snapshotVersion: String
+	type: String
 }
 
 type VehicleHeader {

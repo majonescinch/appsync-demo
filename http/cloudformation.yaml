@@ -35,6 +35,19 @@ Resources:
     Properties:
       ApiId: !GetAtt AppSyncApi.ApiId
       Definition: |
+        type CatalogueBasic implements Pack {
+          version: String
+          fuelType: String
+        }
+
+        interface Pack {
+          version: String
+        }
+
+        type Packs {
+          catalogue_basic: [CatalogueBasic]
+        }
+
         type Query {
           vehicleData(filter: VehicleDataInput): VehicleData
         }
@@ -43,12 +56,13 @@ Resources:
           profileId: String
           header: VehicleHeader
           snapshotVersion: Int
+          packs: Packs
         }
 
         input VehicleDataInput {
           vin: String!
-          snapshotVersion: String = "$LATEST"
-          type: String = "METAL"
+          snapshotVersion: String
+          type: String
         }
 
         type VehicleHeader {
@@ -98,11 +112,42 @@ Resources:
         #end
         ## if the response status code is not 200, then return an error. Else return the body **
         #if($ctx.result.statusCode == 200)
-            ## If response is 200, return the body.
-            $ctx.result.body
+          #set ($body = $util.parseJson($ctx.result.body))
+
+          ## map packs
+          #set ($packs = {})
+
+          #foreach ($key in $body.get("packs").keySet())
+            ## GraphQL doesn't support hyphens in names
+            #set ($name = $key.replace("-", "_"))
+            #set ($pack = [])
+              
+            #foreach ($version in $body.get("packs").get($key).keySet())
+              #set ($packVersion = {
+                  "version": $version
+                })
+                
+                #foreach ($property in $body.get("packs").get($key).get($version).keySet())
+                  $util.qr($packVersion.put("${property}", $body.get("packs").get($key).get($version).get($property)))
+                #end
+                
+                $util.qr($pack.add($packVersion))
+            #end
+
+            $util.qr($packs.put("${name}", $pack))
+          #end
+
+          #set ($vehicleData = {
+            "profileId": $body.get("profileId"),
+            "snapshotVersion": $body.get("snapshotVersion"),
+            "header": $body.get("header"),
+            "packs": $packs
+          })
+
+          $util.toJson($vehicleData)
         #else
-            ## If response is not 200, append the response to error block.
-            $utils.appendError($ctx.result.body, "$ctx.result.statusCode")
+          ## If response is not 200, append the response to error block.
+          $utils.appendError($ctx.result.body, "$ctx.result.statusCode")
         #end
 
 Outputs:
